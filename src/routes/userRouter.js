@@ -13,5 +13,6 @@ router.post("/unfollow/:id", authMiddleware, userController.unfollowUser);
 router.get("/followers/:id", authMiddleware, userController.getFollowers);
 router.get("/following/:id", authMiddleware, userController.getFollowing);
 router.get("/connections", authMiddleware, userController.getConnections);
+router.post("/suggest-connections", authMiddleware, userController.suggestConnections);
 
 module.exports = router;
