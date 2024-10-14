@@ -14,9 +14,14 @@ require("dotenv").config();
 const app = express();
 const server = http.createServer(app);
 
+const corsOptions = {
+   origin: ["https://www.trackmyskills.tech", "http://localhost:3000"],
+   optionsSuccessStatus: 200,
+};
+
 // Middleware
 app.use(express.json());
-app.use(cors({ origin: process.env.ORIGIN }));
+app.use(cors(corsOptions));
 
 // Connect to MongoDB
 mongoose.connect(process.env.MONGODB_URI);
