@@ -1,7 +1,7 @@
 const socketIo = require("socket.io");
 const jwt = require("jsonwebtoken");
 const User = require("../models/User");
-
+require("dotenv").config();
 function initializeChat(server) {
    const io = socketIo(server, {
       cors: {

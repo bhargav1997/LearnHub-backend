@@ -27,14 +27,17 @@ const userSchema = new mongoose.Schema({
    learningGoals: [{ type: String }],
    learningHours: { type: Number, default: 0 },
    coursesCompleted: { type: Number, default: 0 },
-   followers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User', default: [] }],
-   following: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User', default: [] }],
+   followers: [{ type: mongoose.Schema.Types.ObjectId, ref: "User", default: [] }],
+   following: [{ type: mongoose.Schema.Types.ObjectId, ref: "User", default: [] }],
    work: workSchema,
    education: educationSchema,
    skills: [{ type: String }],
    website: { type: String },
    createdAt: { type: Date, default: Date.now },
    lastActive: { type: Date, default: Date.now },
+   twoFactorCode: { type: String },
+   twoFactorCodeExpires: { type: Date },
+   isVerified: { type: Boolean, default: false },
 });
 
 userSchema.virtual("connections").get(function () {

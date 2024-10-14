@@ -2,6 +2,16 @@ const User = require("../models/User");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const validator = require("validator");
+const { generateTwoFactorCode, sendTwoFactorCode } = require("../services/authServices");
+const disposableDomains = require("disposable-email-domains");
+require("dotenv").config();
+console.log("Email User:", process.env.EMAIL_USER);
+console.log("Email Pass:", process.env.EMAIL_PASS ? "Set" : "Not Set");
+// Helper function to check if an email is from a disposable domain
+const isDisposableEmail = (email) => {
+   const domain = email.split("@")[1];
+   return disposableDomains.includes(domain);
+};
 
 const validateAndSanitizeInput = (username, email, password) => {
    let errors = {};
@@ -50,8 +60,6 @@ exports.getProfile = async (req, res) => {
       // Add counts
       userObject.followersCount = followers.length;
       userObject.followingCount = following.length;
-
-      console.log("userObject", userObject);
 
       res.json(userObject);
    } catch (error) {
@@ -113,7 +121,12 @@ exports.updateProfile = async (req, res) => {
 
 exports.register = async (req, res) => {
    try {
-      let { username, email, password } = req.body;
+      const { username, email, password } = req.body;
+
+      // Check if the email is from a disposable domain
+      if (isDisposableEmail(email)) {
+         return res.status(400).json({ message: "Please use a valid, non-disposable email address" });
+      }
 
       // Validate and sanitize input
       const validationResult = validateAndSanitizeInput(username, email, password);
@@ -130,28 +143,30 @@ exports.register = async (req, res) => {
       // Check if user already exists
       let user = await User.findOne({ email });
       if (user) {
-         console.log("User already exists:", email);
          return res.status(400).json({ message: "User already exists" });
       }
+      // Generate and save 2FA code
+      const twoFactorCode = generateTwoFactorCode();
+      user.twoFactorCode = twoFactorCode;
+      user.twoFactorCodeExpires = Date.now() + 10 * 60 * 1000; // 10 minutes expiry
 
       // Hash password
       const salt = await bcrypt.genSalt(10);
       const hashedPassword = await bcrypt.hash(password, salt);
-      console.log("Password hashed successfully", hashedPassword);
-
       // Create new user
       user = new User({
          username,
          email,
          password: hashedPassword,
       });
-
       await user.save();
-      console.log("User saved successfully:", user._id);
 
-      res.status(201).json({ message: "User registered successfully" });
+      // Send 2FA code via email
+      await sendTwoFactorCode(email, twoFactorCode);
+
+      res.status(201).json({ message: "User registered. Please verify your email." });
    } catch (error) {
-      console.error("Registration error:", error);
+      console.error(error);
       res.status(500).json({ message: "Server error" });
    }
 };
@@ -172,31 +187,112 @@ exports.login = async (req, res) => {
       // Check if user exists
       const user = await User.findOne({ email });
       if (!user) {
-         console.log("User not found:", email);
          return res.status(400).json({ message: "Invalid credentials" });
       }
-
-      console.log("User found:", user._id);
-      console.log("Input password:", password);
-      console.log("Stored hashed password:", user.password);
 
       // Check password
       const isMatch = await bcrypt.compare(password, user.password);
-      console.log("Password match:", isMatch);
-
       if (!isMatch) {
-         console.log("Password mismatch for user:", user._id);
          return res.status(400).json({ message: "Invalid credentials" });
       }
 
+      if (!user.isVerified) {
+         // Generate and save 2FA code
+         let twoFactorCode = generateTwoFactorCode();
+         user.twoFactorCode = twoFactorCode;
+         user.twoFactorCodeExpires = Date.now() + 10 * 60 * 1000; // 10 minutes expiry
+
+         console.log("twoFactorCode", twoFactorCode);
+
+         await user.save();
+
+         // Send 2FA code via email
+         // await sendTwoFactorCode(email, twoFactorCode);
+
+         res.json({ message: "2FA code sent. Please verify.", requireTwoFactor: true });
+      } else {
+         // Generate JWT token
+         const payload = {
+            user: {
+               id: user._id,
+            },
+         };
+         const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: "1h" });
+
+         res.json({ message: "Login successful", user, token, requireTwoFactor: false });
+      }
+   } catch (error) {
+      console.error(error);
+      res.status(500).json({ message: "Server error" });
+   }
+};
+
+exports.verifyTwoFactorRegistration = async (req, res) => {
+   try {
+      let { email, code } = req.body;
+
+      // Sanitize email
+      email = email.trim().toLowerCase();
+
+      const user = await User.findOne({ email });
+      if (!user) {
+         return res.status(400).json({ message: "User not found" });
+      }
+
+      if (user.twoFactorCode !== code || user.twoFactorCodeExpires < Date.now()) {
+         return res.status(400).json({ message: "Invalid or expired code" });
+      }
+
+      user.isVerified = true;
+      user.twoFactorCode = undefined;
+      user.twoFactorCodeExpires = undefined;
+      await user.save();
+
+      res.json({ message: "Email verified successfully" });
+   } catch (error) {
+      console.error(error);
+      res.status(500).json({ message: "Server error" });
+   }
+};
+
+exports.verifyTwoFactor = async (req, res) => {
+   try {
+      let { email, code } = req.body;
+
+      // Sanitize email
+      email = email.trim().toLowerCase();
+      console.log("email, code", email, code);
+
+      const user = await User.findOne({ email });
+      if (!user) {
+         return res.status(400).json({ message: "User not found" });
+      }
+
+      console.log("user", user);
+      if (user.twoFactorCode !== code || user.twoFactorCodeExpires < Date.now()) {
+         return res.status(400).json({ message: "Invalid or expired code" });
+      }
+
+      user.twoFactorCode = undefined;
+      user.twoFactorCodeExpires = undefined;
+      user.isVerified = true;
+      await user.save();
+
+      // Generate JWT token
+      const payload = {
+         user: {
+            id: user._id,
+         },
+      };
+
       // Generate JWT
-      const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET, { expiresIn: "1h" });
+      const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: "1h" });
       console.log("Login successful, token generated");
 
       res.json({ token, user });
    } catch (error) {
-      console.error("Login error:", error);
-      res.status(500).json({ message: "Server error" });
+      console.error(error);
+      res.status(500).json({ message: "Server error, Try again later!" });
    }
 };
 
@@ -228,12 +324,12 @@ exports.followUser = async (req, res) => {
       // Fetch the updated current user with populated following and followers
       currentUser = await User.findById(req.user.id)
          .select("-password")
-         .populate('followers', 'username email profilePicture title')
-         .populate('following', 'username email profilePicture title');
+         .populate("followers", "username email profilePicture title")
+         .populate("following", "username email profilePicture title");
 
       res.json({
          message: "Successfully followed user",
-         user: currentUser
+         user: currentUser,
       });
    } catch (error) {
       console.error("Follow error:", error);
@@ -265,12 +361,12 @@ exports.unfollowUser = async (req, res) => {
       // Fetch the updated current user with populated following and followers
       currentUser = await User.findById(req.user.id)
          .select("-password")
-         .populate('followers', 'username email profilePicture title')
-         .populate('following', 'username email profilePicture title');
+         .populate("followers", "username email profilePicture title")
+         .populate("following", "username email profilePicture title");
 
       res.json({
          message: "Successfully unfollowed user",
-         user: currentUser
+         user: currentUser,
       });
    } catch (error) {
       console.error("Unfollow error:", error);

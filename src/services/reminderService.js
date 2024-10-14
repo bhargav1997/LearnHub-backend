@@ -1,15 +1,13 @@
 const cron = require("node-cron");
 const Task = require("../models/Task");
 const User = require("../models/User");
-const nodemailer = require("nodemailer");
+require("dotenv").config();
 
-const transporter = nodemailer.createTransport({
-   // Configure your email service here
-});
+const transporter = require("./mail");
 
 const sendReminder = async (user, task) => {
    const mailOptions = {
-      from: process.env.EMAIL_FROM,
+      from: process.env.EMAIL_USER,
       to: user.email,
       subject: "LearnHub Task Reminder",
       text: `Don't forget about your task: ${task.title}. It's been 3 days since your last activity.`,
