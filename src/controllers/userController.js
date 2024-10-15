@@ -265,12 +265,12 @@ exports.verifyTwoFactor = async (req, res) => {
 
       const user = await User.findOne({ email });
       if (!user) {
-         return res.status(400).json({ message: "User not found" });
+         return res.status(400).json({ message: "User not found", validation: false });
       }
 
       console.log("user", user);
       if (user.twoFactorCode !== code || user.twoFactorCodeExpires < Date.now()) {
-         return res.status(400).json({ message: "Invalid or expired code" });
+         return res.status(400).json({ message: "Invalid or expired code", validation: false });
       }
 
       user.twoFactorCode = undefined;
@@ -289,10 +289,10 @@ exports.verifyTwoFactor = async (req, res) => {
       const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: "1h" });
       console.log("Login successful, token generated");
 
-      res.json({ token, user });
+      res.json({ token, user, validation: true });
    } catch (error) {
       console.error(error);
-      res.status(500).json({ message: "Server error, Try again later!" });
+      res.status(500).json({ message: "Server error, Try again later!", validation: false });
    }
 };
 
