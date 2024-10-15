@@ -1,35 +1,23 @@
-const mongoose = require("mongoose");
 const LearningTask = require("../models/LearningTask");
+const UserStatsService = require("../services/UserStatsService");
 
 exports.createLearningTask = async (req, res) => {
    try {
-      const {
-         taskType,
-         taskTitle, // Changed from name to taskTitle
-         level,
-         progress,
-         status,
-         timeRemain,
-         resourceLinks,
-         estimatedTime,
-         pages,
-         chapters,
-         reminders,
-         personalGoals,
-      } = req.body;
+      const { taskType, taskTitle, resourceLinks, timeRemain, reminders, personalGoals, progress, pages, chapters, estimatedTime, status } =
+         req.body;
 
       // Validation
-      if (!taskType || !taskTitle || !level || progress === undefined || !status || !timeRemain || !estimatedTime) {
+      if (!taskType || !taskTitle || !resourceLinks || !timeRemain || !reminders || progress === undefined || !status) {
          return res.status(400).json({
             message: "Missing required fields",
             missingFields: {
                taskType: !taskType,
                taskTitle: !taskTitle,
-               level: !level,
+               resourceLinks: !resourceLinks,
+               timeRemain: !timeRemain,
+               reminders: !reminders,
                progress: progress === undefined,
                status: !status,
-               timeRemain: !timeRemain,
-               estimatedTime: !estimatedTime,
             },
          });
       }
@@ -39,51 +27,29 @@ exports.createLearningTask = async (req, res) => {
       }
 
       if (progress < 0 || progress > 100) {
-         return res.status(400).json({ message: "Progress must be between 0 and 100" });
-      }
-
-      // Level validation
-      if (!["Beginner", "Intermediate", "Advanced"].includes(level)) {
-         return res.status(400).json({ message: "Invalid level" });
-      }
-
-      // Status validation
-      if (!["Not Started", "In Progress", "Completed"].includes(status)) {
-         return res.status(400).json({ message: "Invalid status" });
-      }
-
-      // Reminders validation
-      if (
-         !reminders ||
-         typeof reminders !== "object" ||
-         !("resume" in reminders) ||
-         !("deadline" in reminders) ||
-         !("every3Hours" in reminders)
-      ) {
-         return res.status(400).json({ message: "Invalid reminders format" });
+         return res.status(400).json({ message: "Initial progress must be between 0 and 100" });
       }
 
       // Create new learning task
       const newTask = new LearningTask({
          user: req.user._id,
          taskType,
-         taskTitle, // Changed from name to taskTitle
-         level,
-         progress,
-         status,
+         taskTitle,
+         resourceLinks,
          timeRemain,
-         lastUpdated: new Date(),
-         progressHistory: [],
-         milestones: [],
-         timeSpent: 0,
-         codeSnippets: [],
-         resourceLinks: resourceLinks || [],
-         peerReviews: [],
-         estimatedTime,
-         pages,
-         chapters,
          reminders,
          personalGoals,
+         progress,
+         pages,
+         chapters,
+         estimatedTime,
+         status,
+         lastUpdated: new Date(),
+         progressHistory: [{ date: new Date(), progress: progress }],
+         timeSpent: 0,
+         codeSnippets: [],
+         resourceLinks: [],
+         totalUnits: taskType === "Book" ? pages : taskType === "Course" ? chapters : 1,
       });
 
       // Save the task
@@ -165,7 +131,7 @@ exports.getLearningTasks = async (req, res) => {
 exports.updateTaskProgress = async (req, res) => {
    try {
       const { taskId } = req.params;
-      const { taskSpecificProgress, notes, codeSnippet, resourceLinks, timeSpent } = req.body;
+      const { notes, codeSnippet, resourceLinks, timeSpent, pagesRead, minutesWatched, paragraphsRead, lessonsCompleted } = req.body;
 
       const task = await LearningTask.findById(taskId);
 
@@ -173,47 +139,30 @@ exports.updateTaskProgress = async (req, res) => {
          return res.status(404).json({ message: "Task not found" });
       }
 
-      // Validate and process taskSpecificProgress based on task type
-      let processedTaskSpecificProgress;
+      // Determine taskSpecificProgress based on task type
+      let taskSpecificProgress;
       switch (task.taskType) {
          case "Book":
-         case "Course":
-            if (!Number.isInteger(taskSpecificProgress) || taskSpecificProgress < 0) {
-               return res.status(400).json({ message: "Invalid task-specific progress for Book/Course. Expected a non-negative integer." });
-            }
-            processedTaskSpecificProgress = taskSpecificProgress;
+            taskSpecificProgress = pagesRead;
             break;
          case "Video":
-            if (typeof taskSpecificProgress !== 'number' || taskSpecificProgress < 0) {
-               return res.status(400).json({ message: "Invalid task-specific progress for Video. Expected a non-negative number." });
-            }
-            processedTaskSpecificProgress = taskSpecificProgress;
+            taskSpecificProgress = minutesWatched;
             break;
          case "Article":
-            if (taskSpecificProgress !== 0 && taskSpecificProgress !== 1) {
-               return res.status(400).json({ message: "Invalid task-specific progress for Article. Expected 0 or 1." });
-            }
-            processedTaskSpecificProgress = taskSpecificProgress;
+            taskSpecificProgress = paragraphsRead;
+            break;
+         case "Course":
+            taskSpecificProgress = lessonsCompleted;
             break;
          default:
             return res.status(400).json({ message: "Invalid task type" });
       }
 
-      // Ensure totalUnits exists and is a number
-      if (typeof task.totalUnits !== 'number' || isNaN(task.totalUnits)) {
-         return res.status(400).json({ message: "Task is missing totalUnits or it's invalid" });
-      }
-
       // Calculate overall progress
-      const newProgress = calculateOverallProgress(task.taskType, processedTaskSpecificProgress, task.totalUnits);
-
-      // Ensure newProgress is a valid number
-      if (isNaN(newProgress)) {
-         return res.status(400).json({ message: "Failed to calculate overall progress" });
-      }
+      const newProgress = calculateOverallProgress(task.taskType, taskSpecificProgress, task.totalUnits);
 
       // Update task
-      task.taskSpecificProgress = processedTaskSpecificProgress;
+      task.taskSpecificProgress = taskSpecificProgress;
       task.progress = newProgress;
       task.timeSpent += timeSpent || 0;
 
@@ -229,43 +178,40 @@ exports.updateTaskProgress = async (req, res) => {
          task.resourceLinks = [...new Set([...task.resourceLinks, ...resourceLinks])];
       }
 
+      task.progressHistory.push({ date: new Date(), progress: newProgress });
+
       const updatedTask = await task.save();
+
+      // Update user stats
+      await UserStatsService.updateLearningTime(req.user._id, timeSpent);
+      await UserStatsService.updateStreak(req.user._id);
+      await UserStatsService.updateTopSkills(req.user._id, task.taskTitle);
+
+      if (newProgress === 100) {
+         await UserStatsService.incrementTasksCompleted(req.user._id);
+         await UserStatsService.incrementLearningTasksCompleted(req.user._id);
+      }
 
       // Format the updated task to match getLearningTasks output
       const formattedTask = {
          id: updatedTask._id.toString(),
          name: updatedTask.taskTitle,
-         level: updatedTask.level,
          progress: updatedTask.progress,
-         status: updatedTask.status,
-         timeRemain: updatedTask.timeRemain,
          lastUpdated: updatedTask.updatedAt.toISOString(),
-         progressHistory: updatedTask.progressHistory?.map((ph) => ({
+         progressHistory: updatedTask.progressHistory.map((ph) => ({
             date: ph.date.toISOString(),
             progress: ph.progress,
-         })) || [],
-         milestones: updatedTask.milestones?.map((m) => ({
-            name: m.title,
-            percentage: m.completed ? 100 : 0,
-         })) || [],
+         })),
          timeSpent: updatedTask.timeSpent,
          codeSnippets: updatedTask.codeSnippets.map((cs) => ({
             content: cs.content,
             timestamp: cs.timestamp.toISOString(),
          })),
          resourceLinks: updatedTask.resourceLinks,
-         peerReviews: updatedTask.peerReviews?.map((pr) => ({
-            reviewer: pr.reviewer,
-            comment: pr.comment,
-            rating: pr.rating,
-         })) || [],
          type: updatedTask.taskType,
          estimatedTime: updatedTask.estimatedTime,
          pages: updatedTask.pages,
          chapters: updatedTask.chapters,
-         reminders: updatedTask.reminders ? Object.keys(updatedTask.reminders).filter((key) => updatedTask.reminders[key]) : [],
-         personalGoals: updatedTask.personalGoals ? [updatedTask.personalGoals] : [],
-         quizResults: updatedTask.quizResults || [],
          notes: updatedTask.notes.map((note) => ({
             content: note.content,
             timestamp: note.timestamp.toISOString(),
@@ -281,20 +227,6 @@ exports.updateTaskProgress = async (req, res) => {
    }
 };
 
-function validateTaskSpecificProgress(taskType, progress) {
-   switch (taskType) {
-      case "Book":
-      case "Course":
-         return Number.isInteger(progress) && progress >= 0;
-      case "Video":
-         return typeof progress === "number" && progress >= 0;
-      case "Article":
-         return progress === 0 || progress === 1;
-      default:
-         return false;
-   }
-}
-
 function calculateOverallProgress(taskType, taskSpecificProgress, totalUnits) {
    switch (taskType) {
       case "Book":
@@ -302,8 +234,19 @@ function calculateOverallProgress(taskType, taskSpecificProgress, totalUnits) {
       case "Course":
          return Math.min(100, Math.round((taskSpecificProgress / totalUnits) * 100));
       case "Article":
-         return taskSpecificProgress * 100;
+         return taskSpecificProgress >= totalUnits ? 100 : 0;
       default:
          return 0;
    }
 }
+
+// Add a new function to get user stats
+exports.getUserStats = async (req, res) => {
+   try {
+      const userStats = await UserStatsService.getUserStats(req.user._id);
+      res.json(userStats);
+   } catch (error) {
+      console.error("Error getting user stats:", error);
+      res.status(500).json({ message: "Server error", error: error.toString() });
+   }
+};

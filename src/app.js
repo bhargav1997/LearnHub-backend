@@ -1,11 +1,11 @@
 const express = require("express");
 const http = require("http");
 const mongoose = require("mongoose");
+const { Server } = require("socket.io");
 const userRoutes = require("./routes/userRouter");
 const taskRoutes = require("./routes/taskRouter");
 const chatRoutes = require("./routes/chatRouter");
 const cors = require("cors");
-
 const reminderService = require("./services/reminderService");
 const initializeChat = require("./services/chatService");
 
@@ -15,8 +15,9 @@ const app = express();
 const server = http.createServer(app);
 
 const corsOptions = {
-   origin: ["https://www.trackmyskills.tech", "http://localhost:3000"],
+   origin: [process.env.ORIGIN, "http://localhost:3000"],
    optionsSuccessStatus: 200,
+   credentials: true,
 };
 
 // Middleware
@@ -26,13 +27,44 @@ app.use(cors(corsOptions));
 // Connect to MongoDB
 mongoose.connect(process.env.MONGODB_URI);
 
+// Initialize Socket.IO
+const io = new Server(server, {
+   cors: corsOptions,
+});
+
+// Make io accessible to our routers
+app.set("io", io);
+
+// Initialize chat service
+initializeChat(io);
+
 // Routes
 app.use("/api/users", userRoutes);
 app.use("/api/tasks", taskRoutes);
 app.use("/api/chat", chatRoutes);
 
-// Initialize chat
-const io = initializeChat(server);
+// Socket.IO connection handling
+io.on("connection", (socket) => {
+   console.log("New client connected");
+
+   socket.on("join room", (roomId) => {
+      socket.join(roomId);
+      console.log(`User joined room ${roomId}`);
+   });
+
+   socket.on("leave room", (roomId) => {
+      socket.leave(roomId);
+      console.log(`User left room ${roomId}`);
+   });
+
+   socket.on("chat message", (msg) => {
+      io.to(msg.roomId).emit("chat message", msg);
+   });
+
+   socket.on("disconnect", () => {
+      console.log("Client disconnected");
+   });
+});
 
 // Start reminder service
 reminderService.startReminderService();

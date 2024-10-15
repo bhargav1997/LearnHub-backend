@@ -414,8 +414,6 @@ exports.getConnections = async (req, res) => {
          return res.status(404).json({ message: "User not found" });
       }
 
-      console.log("user.followers", user);
-
       // Combine followers and following, remove duplicates, and sort by lastActive
       const connections = [...user.followers, ...user.following]
          .filter((connection, index, self) => index === self.findIndex((t) => t._id.toString() === connection._id.toString()))

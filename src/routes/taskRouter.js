@@ -31,5 +31,6 @@ router.get("/", taskController.getTasks);
 router.post("/learning-task", learningTaskLimiter, learningTaskController.createLearningTask);
 router.get("/learning-tasks", learningTaskController.getLearningTasks);
 router.put("/learning-tasks/:taskId/progress", learningTaskController.updateTaskProgress);
+router.get("/user-stats", learningTaskController.getUserStats);
 
 module.exports = router;

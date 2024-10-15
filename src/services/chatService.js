@@ -2,27 +2,25 @@ const socketIo = require("socket.io");
 const jwt = require("jsonwebtoken");
 const User = require("../models/User");
 require("dotenv").config();
-function initializeChat(server) {
-   const io = socketIo(server, {
-      cors: {
-         origin: process.env.ORIGIN, // Replace with your frontend URL
-         methods: ["GET", "POST"],
-      },
-   });
 
-   // Middleware to authenticate socket connections
+function initializeChat(io) {
+   // Use the io instance passed as an argument
    io.use(async (socket, next) => {
       try {
          const token = socket.handshake.auth.token;
+         if (!token) {
+            return next(new Error("Authentication error: No token provided"));
+         }
          const decoded = jwt.verify(token, process.env.JWT_SECRET);
-         const user = await User.findById(decoded.userId).select("-password");
+         console.log("Decoded token:", decoded);
+         const user = await User.findById(decoded.user.id).select("-password");
          if (!user) {
-            return next(new Error("Authentication error"));
+            return next(new Error("Authentication error: User not found"));
          }
          socket.user = user;
          next();
       } catch (error) {
-         next(new Error("Authentication error"));
+         next(new Error(`Authentication error: ${error.message}`));
       }
    });
 
@@ -52,6 +50,28 @@ function initializeChat(server) {
          });
       });
 
+      // Handle private messages
+      socket.on("private_message", ({ recipientId, message }) => {
+         console.log("Received private message:", { recipientId, message });
+         const senderId = socket.user._id.toString();
+
+         // Emit to recipient
+         socket.to(recipientId).emit("private_message", {
+            senderId,
+            senderUsername: socket.user.username,
+            message,
+            timestamp: new Date(),
+         });
+
+         // Emit to sender (so they see their own message)
+         socket.emit("private_message", {
+            senderId,
+            senderUsername: socket.user.username,
+            message,
+            timestamp: new Date(),
+         });
+      });
+
       // Handle user online status
       socket.on("user_online", () => {
          socket.broadcast.emit("user_status", { userId: socket.user._id, status: "online" });
@@ -73,10 +93,14 @@ function initializeChat(server) {
       // Handle disconnection
       socket.on("disconnect", () => {
          console.log(`User disconnected: ${socket.user.username}`);
+         // Leave all rooms
+         Object.keys(socket.rooms).forEach((room) => {
+            if (room !== socket.id) {
+               socket.leave(room);
+            }
+         });
       });
    });
-
-   return io;
 }
 
 module.exports = initializeChat;

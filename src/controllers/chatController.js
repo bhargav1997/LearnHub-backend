@@ -1,4 +1,5 @@
-const Message = require("../models/Chat");
+// const Message = require("../models/Chat");
+const Chat = require("../models/Chat");
 
 exports.getMessages = async (req, res) => {
    try {
@@ -13,29 +14,89 @@ exports.getMessages = async (req, res) => {
    }
 };
 
+exports.getChatHistory = async (req, res) => {
+   try {
+      const { recipientId } = req.params;
+      console.log("te", recipientId);
+      const userId = req.user._id;
+
+      console.log("Fetching chat history for users:", userId, recipientId);
+
+      const messages = await Chat.find({
+         $or: [
+            { sender: userId, recipient: recipientId },
+            { sender: recipientId, recipient: userId },
+         ],
+      })
+         .sort("timestamp")
+         .populate("sender", "username");
+
+      console.log("Found messages:", messages);
+      res.json(messages);
+   } catch (error) {
+      console.error("Error fetching chat history:", error);
+      res.status(500).json({ message: "Error fetching chat history", error: error.toString(), stack: error.stack });
+   }
+};
+
 exports.sendMessage = async (req, res) => {
    try {
-      const { receiverId, content, roomId } = req.body;
-      const senderId = req.user.id;
+      const { roomId, message } = req.body;
+      const newMessage = new Chat({
+         roomId,
+         sender: req.user._id,
+         message,
+      });
+      await newMessage.save();
 
-      // Check if users are connected (following each other)
-      const sender = await User.findById(senderId);
-      const receiver = await User.findById(receiverId);
-
-      if (!sender.following.includes(receiverId) || !receiver.followers.includes(senderId)) {
-         return res.status(403).json({ message: "You can only send messages to your connections" });
+      const io = req.app.get("io");
+      if (!io) {
+         throw new Error("Socket.IO instance not found");
       }
 
-      const message = new Message({
-         sender: senderId,
-         receiver: receiverId,
-         content,
-         roomId,
+      // Emit the message to all users in the room
+      io.to(roomId).emit("chat message", {
+         sender: req.user.username,
+         message,
+         timestamp: newMessage.timestamp,
       });
-      await message.save();
-      res.status(201).json(message);
+
+      res.status(201).json(newMessage);
    } catch (error) {
-      res.status(400).json({ message: error.message });
+      console.error("Error sending message:", error);
+      res.status(500).json({ message: "Error sending message", error: error.message });
+   }
+};
+
+exports.sendPrivateMessage = async (req, res) => {
+   try {
+      const { recipientId, message } = req.body;
+      const senderId = req.user._id;
+
+      const newMessage = new Chat({
+         sender: senderId,
+         recipient: recipientId,
+         message,
+      });
+      await newMessage.save();
+
+      const io = req.app.get("io");
+      if (!io) {
+         throw new Error("Socket.IO instance not found");
+      }
+
+      // Emit to recipient
+      io.to(recipientId).emit("private_message", {
+         senderId: senderId.toString(),
+         senderUsername: req.user.username,
+         message,
+         timestamp: newMessage.timestamp,
+      });
+
+      res.status(201).json(newMessage);
+   } catch (error) {
+      console.error("Error sending private message:", error);
+      res.status(500).json({ message: "Error sending private message", error: error.message });
    }
 };
 

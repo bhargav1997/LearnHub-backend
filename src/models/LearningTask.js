@@ -18,7 +18,6 @@ const learningTaskSchema = new mongoose.Schema(
       },
       totalUnits: {
          type: Number,
-         required: true,
       },
       progress: {
          type: Number,
