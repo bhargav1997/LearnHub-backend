@@ -128,10 +128,38 @@ exports.getLearningTasks = async (req, res) => {
    }
 };
 
+function calculateOverallProgress(taskType, taskSpecificProgress, totalUnits, previousProgress) {
+   switch (taskType) {
+      case "Book":
+         // taskSpecificProgress here represents pages read in this update
+         const totalPagesRead = previousProgress + taskSpecificProgress;
+         return totalUnits ? Math.min(100, Math.round((totalPagesRead / totalUnits) * 100)) : 0;
+      case "Video":
+         return totalUnits ? Math.min(100, Math.round((taskSpecificProgress / totalUnits) * 100)) : 0;
+      case "Course":
+         return totalUnits ? Math.min(100, Math.round((taskSpecificProgress / totalUnits) * 100)) : 0;
+      case "Article":
+         return taskSpecificProgress ? 100 : 0;
+      default:
+         return 0;
+   }
+}
+
+// Add a new function to get user stats
+exports.getUserStats = async (req, res) => {
+   try {
+      const userStats = await UserStatsService.getUserStats(req.user._id);
+      res.json(userStats);
+   } catch (error) {
+      console.error("Error getting user stats:", error);
+      res.status(500).json({ message: "Server error", error: error.toString() });
+   }
+};
+
 exports.updateTaskProgress = async (req, res) => {
    try {
       const { taskId } = req.params;
-      const { notes, codeSnippet, resourceLinks, timeSpent, pagesRead, minutesWatched, paragraphsRead, lessonsCompleted } = req.body;
+      const { notes, codeSnippet, resourceLinks, timeSpent, pagesRead, minutesWatched, paragraphsRead, lessonsCompleted, completed } = req.body;
 
       const task = await LearningTask.findById(taskId);
 
@@ -139,30 +167,38 @@ exports.updateTaskProgress = async (req, res) => {
          return res.status(404).json({ message: "Task not found" });
       }
 
-      // Determine taskSpecificProgress based on task type
-      let taskSpecificProgress;
+      let taskSpecificProgress = 0; // Initialize to 0
+      let previousProgress = task.taskSpecificProgress || 0; // Get previous progress
+
       switch (task.taskType) {
          case "Book":
-            taskSpecificProgress = pagesRead;
+            if (pagesRead !== undefined) {
+               taskSpecificProgress = pagesRead; // Pages read in this update
+               previousProgress = task.taskSpecificProgress || 0; // Previously read pages
+            }
             break;
          case "Video":
-            taskSpecificProgress = minutesWatched;
+            if (minutesWatched !== undefined) taskSpecificProgress = minutesWatched;
             break;
          case "Article":
-            taskSpecificProgress = paragraphsRead;
+            if (completed !== undefined) taskSpecificProgress = completed ? 1 : 0;
             break;
          case "Course":
-            taskSpecificProgress = lessonsCompleted;
+            if (lessonsCompleted !== undefined) taskSpecificProgress = lessonsCompleted;
             break;
          default:
             return res.status(400).json({ message: "Invalid task type" });
       }
 
       // Calculate overall progress
-      const newProgress = calculateOverallProgress(task.taskType, taskSpecificProgress, task.totalUnits);
+      const newProgress = calculateOverallProgress(task.taskType, taskSpecificProgress, task.totalUnits, previousProgress);
 
       // Update task
-      task.taskSpecificProgress = taskSpecificProgress;
+      if (task.taskType === "Book") {
+         task.taskSpecificProgress = (task.taskSpecificProgress || 0) + taskSpecificProgress; // Accumulate pages read
+      } else {
+         task.taskSpecificProgress = taskSpecificProgress;
+      }
       task.progress = newProgress;
       task.timeSpent += timeSpent || 0;
 
@@ -223,30 +259,6 @@ exports.updateTaskProgress = async (req, res) => {
       res.json(formattedTask);
    } catch (error) {
       console.error("Error updating task progress:", error);
-      res.status(500).json({ message: "Server error", error: error.toString() });
-   }
-};
-
-function calculateOverallProgress(taskType, taskSpecificProgress, totalUnits) {
-   switch (taskType) {
-      case "Book":
-      case "Video":
-      case "Course":
-         return Math.min(100, Math.round((taskSpecificProgress / totalUnits) * 100));
-      case "Article":
-         return taskSpecificProgress >= totalUnits ? 100 : 0;
-      default:
-         return 0;
-   }
-}
-
-// Add a new function to get user stats
-exports.getUserStats = async (req, res) => {
-   try {
-      const userStats = await UserStatsService.getUserStats(req.user._id);
-      res.json(userStats);
-   } catch (error) {
-      console.error("Error getting user stats:", error);
       res.status(500).json({ message: "Server error", error: error.toString() });
    }
 };
