@@ -18,9 +18,8 @@ const app = express();
 const server = http.createServer(app);
 
 const corsOptions = {
-   origin: [process.env.ORIGIN, "http://localhost:3000"],
-   optionsSuccessStatus: 200,
-   credentials: true,
+   origin: process.env.ORIGIN,
+   optionsSuccessStatus: 200, // some legacy browsers (IE11, various SmartTVs) choke on 204
 };
 
 // Middleware
@@ -46,7 +45,6 @@ app.use("/api/users", userRoutes);
 app.use("/api/tasks", taskRoutes);
 app.use("/api/chat", chatRoutes);
 app.use("/api/events", eventRoutes);
-app.use("/api/learning-journeys", learningJourneyRoutes);
 
 // Socket.IO connection handling
 io.on("connection", (socket) => {
