@@ -5,8 +5,6 @@ const validator = require("validator");
 const { generateTwoFactorCode, sendTwoFactorCode } = require("../services/authServices");
 const disposableDomains = require("disposable-email-domains");
 require("dotenv").config();
-console.log("Email User:", process.env.EMAIL_USER);
-console.log("Email Pass:", process.env.EMAIL_PASS ? "Set" : "Not Set");
 // Helper function to check if an email is from a disposable domain
 const isDisposableEmail = (email) => {
    const domain = email.split("@")[1];
@@ -121,11 +119,11 @@ exports.updateProfile = async (req, res) => {
 
 exports.register = async (req, res) => {
    try {
-      const { username, email, password } = req.body;
+      let { username, email, password } = req.body;
 
       // Check if the email is from a disposable domain
       if (isDisposableEmail(email)) {
-         return res.status(400).json({ message: "Please use a valid, non-disposable email address" });
+         return res.status(400).json({ message: "Please use a valid, non-disposable email address", error: true });
       }
 
       // Validate and sanitize input
@@ -135,7 +133,7 @@ exports.register = async (req, res) => {
       password = validationResult.password;
 
       if (Object.keys(validationResult.errors).length > 0) {
-         return res.status(400).json({ errors: validationResult.errors });
+         return res.status(400).json({ errors: validationResult.errors, error: true });
       }
 
       console.log("Registration attempt:", { username, email });
@@ -143,31 +141,34 @@ exports.register = async (req, res) => {
       // Check if user already exists
       let user = await User.findOne({ email });
       if (user) {
-         return res.status(400).json({ message: "User already exists" });
+         return res.status(400).json({ message: "User already exists", error: true });
       }
       // Generate and save 2FA code
-      const twoFactorCode = generateTwoFactorCode();
-      user.twoFactorCode = twoFactorCode;
-      user.twoFactorCodeExpires = Date.now() + 10 * 60 * 1000; // 10 minutes expiry
+      // let twoFactorCode = generateTwoFactorCode();
 
       // Hash password
       const salt = await bcrypt.genSalt(10);
       const hashedPassword = await bcrypt.hash(password, salt);
+
       // Create new user
       user = new User({
          username,
          email,
          password: hashedPassword,
       });
+
+      // user.twoFactorCode = twoFactorCode;
+      // user.twoFactorCodeExpires = Date.now() + 10 * 60 * 1000; // 10 minutes expiry
+
       await user.save();
 
       // Send 2FA code via email
-      await sendTwoFactorCode(email, twoFactorCode);
+      // await sendTwoFactorCode(email, twoFactorCode);
 
-      res.status(201).json({ message: "User registered. Please verify your email." });
+      res.status(201).json({ message: "User registered. Please verify your email.", error: false });
    } catch (error) {
       console.error(error);
-      res.status(500).json({ message: "Server error" });
+      res.status(500).json({ message: "Server error", error: true });
    }
 };
 
@@ -207,7 +208,7 @@ exports.login = async (req, res) => {
          await user.save();
 
          // Send 2FA code via email
-         // await sendTwoFactorCode(email, twoFactorCode);
+         await sendTwoFactorCode(email, twoFactorCode);
 
          res.json({ message: "2FA code sent. Please verify.", requireTwoFactor: true });
       } else {
@@ -530,5 +531,38 @@ exports.suggestConnections = async (req, res) => {
    } catch (error) {
       console.error("Error suggesting connections:", error);
       res.status(500).json({ message: "Error suggesting connections" });
+   }
+};
+
+exports.resendTwoFactorCode = async (req, res) => {
+   try {
+      let { email } = req.body;
+
+      // Sanitize email
+      email = email.trim().toLowerCase();
+
+      if (!validator.isEmail(email)) {
+         return res.status(400).json({ message: "Invalid email format" });
+      }
+
+      const user = await User.findOne({ email });
+      if (!user) {
+         return res.status(400).json({ message: "User not found" });
+      }
+
+      // Generate new 2FA code
+      const twoFactorCode = generateTwoFactorCode();
+      user.twoFactorCode = twoFactorCode;
+      user.twoFactorCodeExpires = Date.now() + 10 * 60 * 1000; // 10 minutes expiry
+
+      await user.save();
+
+      // Send 2FA code via email
+      await sendTwoFactorCode(email, twoFactorCode);
+
+      res.json({ message: "New 2FA code sent. Please check your email." });
+   } catch (error) {
+      console.error("Error resending 2FA code:", error);
+      res.status(500).json({ message: "Server error", error: error.toString() });
    }
 };

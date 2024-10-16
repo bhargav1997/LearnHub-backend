@@ -6,6 +6,8 @@ const userRoutes = require("./routes/userRouter");
 const taskRoutes = require("./routes/taskRouter");
 const eventRoutes = require("./routes/eventRouter");
 const chatRoutes = require("./routes/chatRouter");
+const learningJourneyRoutes = require("./routes/learningJourneyRouter");
+
 const cors = require("cors");
 const reminderService = require("./services/reminderService");
 const initializeChat = require("./services/chatService");
@@ -44,6 +46,7 @@ app.use("/api/users", userRoutes);
 app.use("/api/tasks", taskRoutes);
 app.use("/api/chat", chatRoutes);
 app.use("/api/events", eventRoutes);
+app.use("/api/learning-journeys", learningJourneyRoutes);
 
 // Socket.IO connection handling
 io.on("connection", (socket) => {

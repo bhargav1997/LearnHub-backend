@@ -128,23 +128,6 @@ exports.getLearningTasks = async (req, res) => {
    }
 };
 
-function calculateOverallProgress(taskType, taskSpecificProgress, totalUnits, previousProgress) {
-   switch (taskType) {
-      case "Book":
-         // taskSpecificProgress here represents pages read in this update
-         const totalPagesRead = previousProgress + taskSpecificProgress;
-         return totalUnits ? Math.min(100, Math.round((totalPagesRead / totalUnits) * 100)) : 0;
-      case "Video":
-         return totalUnits ? Math.min(100, Math.round((taskSpecificProgress / totalUnits) * 100)) : 0;
-      case "Course":
-         return totalUnits ? Math.min(100, Math.round((taskSpecificProgress / totalUnits) * 100)) : 0;
-      case "Article":
-         return taskSpecificProgress ? 100 : 0;
-      default:
-         return 0;
-   }
-}
-
 // Add a new function to get user stats
 exports.getUserStats = async (req, res) => {
    try {
@@ -159,7 +142,8 @@ exports.getUserStats = async (req, res) => {
 exports.updateTaskProgress = async (req, res) => {
    try {
       const { taskId } = req.params;
-      const { notes, codeSnippet, resourceLinks, timeSpent, pagesRead, minutesWatched, paragraphsRead, lessonsCompleted, completed } = req.body;
+      const { notes, codeSnippet, resourceLinks, timeSpent, pagesRead, minutesWatched, paragraphsRead, lessonsCompleted, completed } =
+         req.body;
 
       const task = await LearningTask.findById(taskId);
 
@@ -167,38 +151,48 @@ exports.updateTaskProgress = async (req, res) => {
          return res.status(404).json({ message: "Task not found" });
       }
 
-      let taskSpecificProgress = 0; // Initialize to 0
-      let previousProgress = task.taskSpecificProgress || 0; // Get previous progress
+      let taskSpecificProgress = 0;
+      let previousProgress = task.taskSpecificProgress || 0;
 
       switch (task.taskType) {
          case "Book":
             if (pagesRead !== undefined) {
-               taskSpecificProgress = pagesRead; // Pages read in this update
-               previousProgress = task.taskSpecificProgress || 0; // Previously read pages
+               taskSpecificProgress = pagesRead;
+               task.taskSpecificProgress = (task.taskSpecificProgress || 0) + taskSpecificProgress;
             }
             break;
          case "Video":
-            if (minutesWatched !== undefined) taskSpecificProgress = minutesWatched;
+            if (minutesWatched !== undefined) {
+               taskSpecificProgress = minutesWatched;
+               task.taskSpecificProgress = taskSpecificProgress;
+            }
             break;
          case "Article":
-            if (completed !== undefined) taskSpecificProgress = completed ? 1 : 0;
+            if (completed !== undefined) {
+               taskSpecificProgress = completed ? 1 : 0;
+               task.taskSpecificProgress = taskSpecificProgress;
+            }
             break;
          case "Course":
-            if (lessonsCompleted !== undefined) taskSpecificProgress = lessonsCompleted;
+            if (lessonsCompleted !== undefined) {
+               taskSpecificProgress = lessonsCompleted;
+               task.taskSpecificProgress = taskSpecificProgress;
+            }
             break;
          default:
             return res.status(400).json({ message: "Invalid task type" });
       }
 
       // Calculate overall progress
-      const newProgress = calculateOverallProgress(task.taskType, taskSpecificProgress, task.totalUnits, previousProgress);
+      const newProgress = calculateOverallProgress(
+         task.taskType,
+         taskSpecificProgress,
+         task.totalUnits,
+         previousProgress,
+         task.estimatedTime,
+      );
 
       // Update task
-      if (task.taskType === "Book") {
-         task.taskSpecificProgress = (task.taskSpecificProgress || 0) + taskSpecificProgress; // Accumulate pages read
-      } else {
-         task.taskSpecificProgress = taskSpecificProgress;
-      }
       task.progress = newProgress;
       task.timeSpent += timeSpent || 0;
 
@@ -214,7 +208,20 @@ exports.updateTaskProgress = async (req, res) => {
          task.resourceLinks = [...new Set([...task.resourceLinks, ...resourceLinks])];
       }
 
-      task.progressHistory.push({ date: new Date(), progress: newProgress });
+      // Update progress history
+      task.progressHistory.push({
+         date: new Date(),
+         progress: newProgress,
+         timeSpent: timeSpent || 0,
+         taskSpecificProgress: task.taskSpecificProgress,
+         notes: notes ? [{ content: notes, timestamp: new Date() }] : [],
+         codeSnippets: codeSnippet ? [{ content: codeSnippet, timestamp: new Date() }] : [],
+      });
+
+      // Update timeRemain
+      const totalTimeSpent = task.timeSpent;
+      const remainingTime = Math.max(0, task.estimatedTime - totalTimeSpent);
+      task.timeRemain = formatTimeRemain(remainingTime);
 
       const updatedTask = await task.save();
 
@@ -237,6 +244,10 @@ exports.updateTaskProgress = async (req, res) => {
          progressHistory: updatedTask.progressHistory.map((ph) => ({
             date: ph.date.toISOString(),
             progress: ph.progress,
+            timeSpent: ph.timeSpent,
+            taskSpecificProgress: ph.taskSpecificProgress,
+            notes: ph.notes,
+            codeSnippets: ph.codeSnippets,
          })),
          timeSpent: updatedTask.timeSpent,
          codeSnippets: updatedTask.codeSnippets.map((cs) => ({
@@ -254,11 +265,69 @@ exports.updateTaskProgress = async (req, res) => {
          })),
          taskSpecificProgress: updatedTask.taskSpecificProgress,
          totalUnits: updatedTask.totalUnits,
+         timeRemain: updatedTask.timeRemain,
       };
 
       res.json(formattedTask);
    } catch (error) {
       console.error("Error updating task progress:", error);
+      res.status(500).json({ message: "Server error", error: error.toString() });
+   }
+};
+
+function calculateOverallProgress(taskType, taskSpecificProgress, totalUnits, previousProgress, estimatedTime) {
+   switch (taskType) {
+      case "Book":
+         const totalPagesRead = previousProgress + taskSpecificProgress;
+         return totalUnits ? Math.min(100, Math.round((totalPagesRead / totalUnits) * 100)) : 0;
+      case "Video":
+         return totalUnits ? Math.min(100, Math.round((taskSpecificProgress / totalUnits) * 100)) : 0;
+      case "Course":
+         // For courses, use estimatedTime instead of totalUnits
+         return estimatedTime ? Math.min(100, Math.round((taskSpecificProgress / estimatedTime) * 100)) : 0;
+      case "Article":
+         return taskSpecificProgress ? 100 : 0;
+      default:
+         return 0;
+   }
+}
+
+function formatTimeRemain(minutes) {
+   const days = Math.floor(minutes / (24 * 60));
+   const hours = Math.floor((minutes % (24 * 60)) / 60);
+   const remainingMinutes = minutes % 60;
+
+   if (days > 0) {
+      return `${days} day${days > 1 ? "s" : ""}`;
+   } else if (hours > 0) {
+      return `${hours} hour${hours > 1 ? "s" : ""}`;
+   } else {
+      return `${remainingMinutes} minute${remainingMinutes > 1 ? "s" : ""}`;
+   }
+}
+
+exports.deleteLearningTask = async (req, res) => {
+   try {
+      const { taskId } = req.params;
+
+      // Find the task and ensure it belongs to the current user
+      const task = await LearningTask.findOne({ _id: taskId, user: req.user._id });
+
+      if (!task) {
+         return res.status(404).json({ message: "Task not found or you don't have permission to delete it" });
+      }
+
+      // Delete the task
+      await LearningTask.findByIdAndDelete(taskId);
+
+      // Update user stats only if the task was completed
+      if (task.progress === 100) {
+         await UserStatsService.decrementTotalTasks(req.user._id);
+      }
+
+      res.json({ message: "Task deleted successfully" });
+   } catch (error) {
+      console.error("Error deleting learning task:", error);
       res.status(500).json({ message: "Server error", error: error.toString() });
    }
 };

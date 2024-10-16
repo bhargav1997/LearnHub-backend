@@ -1,6 +1,6 @@
 const express = require("express");
 const { default: rateLimit } = require("express-rate-limit");
-const userController = require("../controllers/userController");
+const userController = require("../controllers/UserController");
 const authMiddleware = require("../middleware/authMiddleware");
 
 const router = express.Router();
@@ -27,5 +27,6 @@ router.get("/connections", authMiddleware, userController.getConnections);
 router.post("/suggest-connections", authMiddleware, userController.suggestConnections);
 router.post("/verify-2fa-registration", userController.verifyTwoFactorRegistration);
 router.post("/verify-2fa", userController.verifyTwoFactor);
+router.post("/resend-2fa-code", userController.resendTwoFactorCode);
 
 module.exports = router;

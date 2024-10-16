@@ -92,6 +92,18 @@ class UserStatsService {
       await userStats.save();
       return userStats;
    }
+
+   static async decrementTotalTasks(userId) {
+      const userStats = await this.getOrCreateUserStats(userId);
+      
+      // Decrement tasksCompleted, but ensure it doesn't go below 0
+      userStats.tasksCompleted = Math.max(0, userStats.tasksCompleted - 1);
+      
+      // Decrement learningTasksCompleted, but ensure it doesn't go below 0
+      userStats.learningTasksCompleted = Math.max(0, userStats.learningTasksCompleted - 1);
+      
+      await userStats.save();
+   }
 }
 
 module.exports = UserStatsService;
