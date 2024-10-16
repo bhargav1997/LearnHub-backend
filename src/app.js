@@ -45,6 +45,7 @@ app.use("/api/users", userRoutes);
 app.use("/api/tasks", taskRoutes);
 app.use("/api/chat", chatRoutes);
 app.use("/api/events", eventRoutes);
+app.use("/api/learning-journeys", learningJourneyRoutes);
 
 // Socket.IO connection handling
 io.on("connection", (socket) => {
