@@ -117,7 +117,7 @@ exports.updateProfile = async (req, res) => {
    }
 };
 
-exports.register = async (req, res) => {
+exports.initiateRegistration = async (req, res) => {
    try {
       let { username, email, password } = req.body;
 
@@ -133,39 +133,79 @@ exports.register = async (req, res) => {
       password = validationResult.password;
 
       if (Object.keys(validationResult.errors).length > 0) {
-         return res.status(400).json({ errors: validationResult.errors, error: true });
+         return res.status(400).json({ message: "Validation failed", error: true });
       }
 
-      console.log("Registration attempt:", { username, email });
-
-      // Check if user already exists
-      let user = await User.findOne({ email });
-      if (user) {
-         return res.status(400).json({ message: "User already exists", error: true });
+      // Check if username already exists
+      const existingUsername = await User.findOne({ username });
+      if (existingUsername) {
+         return res.status(400).json({ message: "Username already exists", field: "username", error: true });
       }
-      // Generate and save 2FA code
-      // let twoFactorCode = generateTwoFactorCode();
+
+      // Check if email already exists
+      const existingEmail = await User.findOne({ email });
+      if (existingEmail) {
+         return res.status(400).json({ message: "Email already exists", field: "email", error: true });
+      }
+
+      // Generate 2FA code
+      const twoFactorCode = generateTwoFactorCode();
+      const twoFactorCodeExpires = Date.now() + 10 * 60 * 1000; // 10 minutes expiry
+
+      // Store registration data in session or temporary storage
+      // For this example, we'll use the server's memory (not recommended for production)
+      global.pendingRegistrations = global.pendingRegistrations || {};
+      global.pendingRegistrations[email] = {
+         username,
+         email,
+         password,
+         twoFactorCode,
+         twoFactorCodeExpires,
+      };
+
+      // Send 2FA code via email
+      await sendTwoFactorCode(email, twoFactorCode);
+
+      res.status(200).json({ message: "Registration initiated. Please check your email for the verification code.", error: false });
+   } catch (error) {
+      console.error(error);
+      res.status(500).json({ message: "Server error", error: true });
+   }
+};
+
+exports.completeRegistration = async (req, res) => {
+   try {
+      const { email, code } = req.body;
+
+      // Retrieve pending registration data
+      const registrationData = global.pendingRegistrations[email];
+
+      if (!registrationData) {
+         return res.status(400).json({ message: "Invalid or expired registration attempt", error: true });
+      }
+
+      if (registrationData.twoFactorCode !== code || registrationData.twoFactorCodeExpires < Date.now()) {
+         return res.status(400).json({ message: "Invalid or expired verification code", error: true });
+      }
 
       // Hash password
       const salt = await bcrypt.genSalt(10);
-      const hashedPassword = await bcrypt.hash(password, salt);
+      const hashedPassword = await bcrypt.hash(registrationData.password, salt);
 
       // Create new user
-      user = new User({
-         username,
-         email,
+      const user = new User({
+         username: registrationData.username,
+         email: registrationData.email,
          password: hashedPassword,
+         isVerified: true,
       });
-
-      // user.twoFactorCode = twoFactorCode;
-      // user.twoFactorCodeExpires = Date.now() + 10 * 60 * 1000; // 10 minutes expiry
 
       await user.save();
 
-      // Send 2FA code via email
-      // await sendTwoFactorCode(email, twoFactorCode);
+      // Remove pending registration data
+      delete global.pendingRegistrations[email];
 
-      res.status(201).json({ message: "User registered. Please verify your email.", error: false });
+      res.status(201).json({ message: "User registered successfully", error: false });
    } catch (error) {
       console.error(error);
       res.status(500).json({ message: "Server error", error: true });
@@ -534,9 +574,60 @@ exports.suggestConnections = async (req, res) => {
    }
 };
 
+exports.sendTwoFactorCode = async (req, res) => {
+   try {
+      let { email, isRegistration } = req.body;
+
+      // Sanitize email
+      email = email.trim().toLowerCase();
+
+      if (isRegistration) {
+         // Check if there's a pending registration for this email
+         if (!global.pendingRegistrations || !global.pendingRegistrations[email]) {
+            return res.status(400).json({ message: "No pending registration found for this email", error: true });
+         }
+
+         const pendingRegistration = global.pendingRegistrations[email];
+
+         // Generate new 2FA code
+         const twoFactorCode = generateTwoFactorCode();
+         const twoFactorCodeExpires = Date.now() + 10 * 60 * 1000; // 10 minutes expiry
+
+         // Update the pending registration with the new code
+         pendingRegistration.twoFactorCode = twoFactorCode;
+         pendingRegistration.twoFactorCodeExpires = twoFactorCodeExpires;
+
+         // Send 2FA code via email
+         await sendTwoFactorCode(email, twoFactorCode);
+
+         res.json({ message: "2FA code sent. Please check your email for the verification code.", error: false });
+      } else {
+         const user = await User.findOne({ email });
+         if (!user) {
+            return res.status(400).json({ message: "User not found", error: true });
+         }
+
+         // Generate new 2FA code
+         const twoFactorCode = generateTwoFactorCode();
+         user.twoFactorCode = twoFactorCode;
+         user.twoFactorCodeExpires = Date.now() + 10 * 60 * 1000; // 10 minutes expiry
+
+         await user.save();
+
+         // Send 2FA code via email
+         await sendTwoFactorCode(email, twoFactorCode);
+
+         res.json({ message: "2FA code sent. Please check your email.", error: false });
+      }
+   } catch (error) {
+      console.error("Error sending 2FA code:", error);
+      res.status(500).json({ message: "Server error", error: true });
+   }
+};
+
 exports.resendTwoFactorCode = async (req, res) => {
    try {
-      let { email } = req.body;
+      let { email, isRegistration } = req.body;
 
       // Sanitize email
       email = email.trim().toLowerCase();
@@ -545,9 +636,11 @@ exports.resendTwoFactorCode = async (req, res) => {
          return res.status(400).json({ message: "Invalid email format" });
       }
 
-      const user = await User.findOne({ email });
-      if (!user) {
-         return res.status(400).json({ message: "User not found" });
+      if (isRegistration) {
+         const user = await User.findOne({ email });
+         if (!user) {
+            return res.status(400).json({ message: "User not found" });
+         }
       }
 
       // Generate new 2FA code
@@ -564,5 +657,36 @@ exports.resendTwoFactorCode = async (req, res) => {
    } catch (error) {
       console.error("Error resending 2FA code:", error);
       res.status(500).json({ message: "Server error", error: error.toString() });
+   }
+};
+
+exports.validateUserDetails = async (req, res) => {
+   try {
+      const { username, email } = req.body;
+
+      // Validate and sanitize input
+      const validationResult = validateAndSanitizeInput(username, email, "dummyPassword");
+
+      if (Object.keys(validationResult.errors).length > 0) {
+         return res.status(400).json({ message: "Validation failed", error: true });
+      }
+
+      // Check if username already exists
+      const existingUsername = await User.findOne({ username: validationResult.username });
+      if (existingUsername) {
+         return res.status(400).json({ message: "Username already exists", field: "username", error: true });
+      }
+
+      // Check if email already exists
+      const existingEmail = await User.findOne({ email: validationResult.email });
+      if (existingEmail) {
+         return res.status(400).json({ message: "Email already exists", field: "email", error: true });
+      }
+
+      // If we get here, both username and email are available
+      res.json({ message: "Username and email are available", error: false });
+   } catch (error) {
+      console.error("Validation error:", error);
+      res.status(500).json({ message: "Server error", error: true });
    }
 };
