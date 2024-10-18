@@ -34,4 +34,6 @@ router.post("/send-2fa-code", userController.sendTwoFactorCode);
 router.post("/initiate-registration", userController.initiateRegistration);
 router.post("/complete-registration", userController.completeRegistration);
 
+router.get('/search-connections', authMiddleware, userController.searchConnections);
+
 module.exports = router;

@@ -1,5 +1,6 @@
 // const Message = require("../models/Chat");
 const Chat = require("../models/Chat");
+const mongoose = require("mongoose");
 
 exports.getMessages = async (req, res) => {
    try {
@@ -114,5 +115,37 @@ exports.getRecentChats = async (req, res) => {
       res.json(recentChats);
    } catch (error) {
       res.status(500).json({ message: error.message });
+   }
+};
+
+exports.clearPrivateChat = async (req, res) => {
+   try {
+      const userId = req.user.id;
+      const recipientId = req.params.recipientId;
+
+      // Validate that recipientId is a valid ObjectId
+      if (!mongoose.Types.ObjectId.isValid(recipientId)) {
+         return res.status(400).json({ message: "Invalid recipient ID", error: true });
+      }
+
+      console.log(`Attempting to clear chat between ${userId} and ${recipientId}`);
+
+      const result = await Chat.deleteMany({
+         $or: [
+            { sender: userId, recipient: recipientId },
+            { sender: recipientId, recipient: userId },
+         ],
+      });
+
+      console.log(`Deletion result:`, result);
+
+      if (result.deletedCount > 0) {
+         res.json({ message: `Private chat cleared successfully. Deleted ${result.deletedCount} messages.`, error: false });
+      } else {
+         res.json({ message: "No messages found to delete", error: false });
+      }
+   } catch (error) {
+      console.error("Error clearing private chat:", error);
+      res.status(500).json({ message: "Server error", error: true });
    }
 };

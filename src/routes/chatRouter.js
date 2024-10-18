@@ -10,5 +10,6 @@ router.get("/recent", authMiddleware, chatController.getRecentChats);
 router.get("/history/:recipientId", authMiddleware, chatController.getChatHistory);
 router.post("/send", authMiddleware, chatController.sendMessage);
 router.post("/private", authMiddleware, chatController.sendPrivateMessage);
+router.delete("/clear-private-chat/:recipientId", authMiddleware, chatController.clearPrivateChat);
 
 module.exports = router;

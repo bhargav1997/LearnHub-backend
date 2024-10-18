@@ -113,7 +113,46 @@ exports.updateProfile = async (req, res) => {
       res.json(user);
    } catch (error) {
       console.error("Profile update error:", error);
-      res.status(400).json({ message: error.message });
+      res.status(400).json({ message: error.message, error: true });
+   }
+};
+
+exports.searchConnections = async (req, res) => {
+   try {
+      const { term } = req.query;
+      const currentUser = await User.findById(req.user.id);
+
+      if (!currentUser) {
+         return res.status(404).json({ message: "User not found", error: true });
+      }
+
+      // Combine followers and following IDs, removing duplicates
+      const connectionIds = [...new Set([...currentUser.followers, ...currentUser.following])];
+
+      // Find users matching the search term and are in the connections list
+      const filteredConnections = await User.find({
+         _id: { $in: connectionIds },
+         $or: [
+            { username: { $regex: term, $options: 'i' } },
+            { email: { $regex: term, $options: 'i' } }
+         ]
+      }).select('_id username email profilePicture title').limit(20);
+
+      // Add flags to indicate if the user is a follower, following, or both
+      const results = filteredConnections.map(user => ({
+         _id: user._id,
+         username: user.username,
+         email: user.email,
+         profilePicture: user.profilePicture,
+         title: user.title,
+         isFollower: currentUser.followers.includes(user._id),
+         isFollowing: currentUser.following.includes(user._id)
+      }));
+
+      res.json(results);
+   } catch (error) {
+      console.error("Error searching connections:", error);
+      res.status(500).json({ message: "Error searching connections" });
    }
 };
 
