@@ -33,6 +33,10 @@ const learningJourneySchema = new mongoose.Schema(
       tasks: [taskSchema],
       steps: [String],
       notes: String,
+      sharedWith: [{
+         type: mongoose.Schema.Types.ObjectId,
+         ref: "User"
+      }],
    },
    { timestamps: true },
 );
