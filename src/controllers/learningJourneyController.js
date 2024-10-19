@@ -1,4 +1,5 @@
 const LearningJourney = require("../models/LearningJourney");
+const Notification = require("../models/Notification");
 const SharedJourney = require("../models/SharedJourney");
 const User = require("../models/User");
 const NotificationController = require("./notificationController");
