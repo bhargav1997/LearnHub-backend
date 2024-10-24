@@ -8,6 +8,7 @@ const eventRoutes = require("./routes/eventRouter");
 const chatRoutes = require("./routes/chatRouter");
 const learningJourneyRoutes = require("./routes/learningJourneyRouter");
 const notificationRoutes = require("./routes/notificationRouter");
+const postRoutes = require("./routes/postRouter");
 
 const cors = require("cors");
 const reminderService = require("./services/reminderService");
@@ -23,8 +24,11 @@ const corsOptions = {
    optionsSuccessStatus: 200, // some legacy browsers (IE11, various SmartTVs) choke on 204
 };
 
+// Increase the limit here
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
+
 // Middleware
-app.use(express.json());
 app.use(cors(corsOptions));
 
 // Connect to MongoDB
@@ -48,6 +52,7 @@ app.use("/api/chat", chatRoutes);
 app.use("/api/events", eventRoutes);
 app.use("/api/learning-journeys", learningJourneyRoutes);
 app.use("/api/notifications", notificationRoutes);
+app.use("/api/posts", postRoutes);
 
 // Socket.IO connection handling
 io.on("connection", (socket) => {
